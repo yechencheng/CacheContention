@@ -41,16 +41,67 @@ END_LEGAL */
 
 using namespace std;
 
-ofstream out;
+
 static const unsigned int BUFFERSIZE = (uint64_t)1 << 20;
 static const uint64_t MASK = ((uint64_t)1 << 20) - 1;
 
-namespace CoarsePageRecord{
+namespace PageStatistic{
+	ofstream out;
+	map<uint64_t, uint64_t> pages;
+
+	VOID RecordMemRead(VOID * ip, VOID * addr){
+	    pages[(uint64_t)addr >> 12]++;
+	}
+
+	VOID RecordMemWrite(VOID * ip, VOID * addr){
+	    pages[(uint64_t)addr >> 12]++;
+	}
+
+	VOID Instruction(INS ins, VOID *v){
+	    UINT32 memOperands = INS_MemoryOperandCount(ins);
+
+	    for (UINT32 memOp = 0; memOp < memOperands; memOp++)
+	    {
+	        if (INS_MemoryOperandIsRead(ins, memOp))
+	        {
+	            INS_InsertPredicatedCall(
+	                ins, IPOINT_BEFORE, (AFUNPTR)RecordMemRead,
+	                IARG_INST_PTR,
+	                IARG_MEMORYOP_EA, memOp,
+	                IARG_END);
+	        }
+	        if (INS_MemoryOperandIsWritten(ins, memOp))
+	        {
+	            INS_InsertPredicatedCall(
+	                ins, IPOINT_BEFORE, (AFUNPTR)RecordMemWrite,
+	                IARG_INST_PTR,
+	                IARG_MEMORYOP_EA, memOp,
+	                IARG_END);
+	        }
+	    }
+	}
+
+	VOID Fini(INT32 code, VOID *v){
+	    for(map<uint64_t, uint64_t>::iterator it = pages.begin(); it != pages.end(); it++){
+	    	out << it->first << "\t" << it->second << endl;
+	    }
+	    out.close();
+	}
+
+	VOID Run(){
+		out.open("PageStatistic.out", ios::out | ios::app);
+		INS_AddInstrumentFunction(Instruction, 0);
+    	PIN_AddFiniFunction(Fini, 0);
+	}
+}
+
+namespace CoarsePageStat{
 
 	uint64_t micount = 0; //memory instructions count
 	uint64_t icount = 0; //instructions count
 	uint64_t tmicount = 0;
 
+	ofstream out;
 	map<uint64_t, uint64_t> pages;
 
 	
@@ -121,6 +172,7 @@ namespace CoarsePageRecord{
 	}
 
 	VOID Run(){
+		out.open("CoarsePageStat.out", ios::out | ios::app);
 		INS_AddInstrumentFunction(Instruction, 0);
     	PIN_AddFiniFunction(Fini, 0);
 	}
@@ -139,9 +191,8 @@ int main(int argc, char *argv[])
 {
     if (PIN_Init(argc, argv)) return Usage();
 
-    out.open("memtrace.out", ios::out);
-
-    CoarsePageRecord::Run();
+    //PageStatistic::Run();
+    CoarsePageStat::Run();
 
     PIN_StartProgram();
     
